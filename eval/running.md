@@ -45,6 +45,7 @@ node eval/scripts/token-ledger.mjs <run-dir> [--ab <A>,<B> [--control <A2>,<B>]]
 node eval/scripts/regrade.mjs <run-dir>            # re-grade from kept server state with today's validators
 node eval/scripts/compare.mjs <runA>:<c> <runB>:<c>  # one condition across two runs, or a refusal
 node eval/scripts/history.mjs add <run-dir>        # file the run in results/index.jsonl
+node eval/scripts/combine-runs.mjs <firefox-run> <playwright-run> <new-run-dir>  # pair separate single-condition runs; preserves source dates and browser builds
 node eval/scripts/judge.mjs <run-dir> --dry-run    # the transcript judge's prompts; --paid calls it
 node eval/scripts/judge-run.mjs <run-dir> --judgments <complete-pair-diagnoses.json> --dry-run  # run-wide judge; --paid calls it
 node eval/scripts/judge-validate.mjs --score <dir> # the judge's agreement with the reference labels
@@ -52,8 +53,13 @@ node eval/scripts/judge-validate.mjs --score <dir> # the judge's agreement with 
 
 Every finished eval now writes `report.html` next to `report.md`, including when
 `--report-from` refreshes an earlier run. For manual regeneration, run
-`node eval/scripts/html-report.mjs <run-dir>` (or pass `--out <file>`). The HTML
-includes per-surface totals, paired
+`node eval/scripts/html-report.mjs <run-dir>` (or pass `--out <file>`). Render
+a combined run with `node eval/run.mjs --report-from <new-run-dir> --ab
+firefox-devtools-mcp,playwright-mcp`. Only combine complete single-condition
+runs (or select the Playwright arm of a complete paired run) with the same task
+definitions, seed, model, and serving mode; the report
+records both source runs and their distinct browsers. Judge the new pairs rather
+than reusing judgments from either source run. The HTML includes per-surface totals, paired
 input-token ratios (including cache reads and writes) when there are two surfaces,
 and pass, input, cache-read share and output together in the family and task tables.
 Input tokens are not cost: cached and uncached tokens may have different prices.
@@ -82,6 +88,13 @@ generated site directory, not the private run directories beside it.
 The config and generator are tracked; the run data and generated gallery are ignored.
 To reconstruct the gallery, restore the referenced run directories and video under
 `eval/results/`, then run `node eval/scripts/report-site.mjs`.
+
+Child and standalone HTML reports also summarize browser-tool calls by surface, common tool
+handoffs, and the next browser call after an explicitly reported tool error.
+Call counts come from run telemetry or stored transcripts; handoffs require
+transcripts. These sequences do not establish why an agent changed tools.
+When selected pair judgments include tool behaviours, the report groups those
+observations and links examples to the corresponding task details.
 
 `eval/analysis.md`, "From a run to an A/B report", lists the files each reader needs
 and gives three recipes, one of them free.

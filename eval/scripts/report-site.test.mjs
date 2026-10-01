@@ -17,7 +17,7 @@ test('builds selected children and links, and removes deselected children on reb
     writeFileSync(join(runDir, 'transcripts', 'first--mfa-login--a1.jsonl'), '{"type":"step"}\n');
     writeFileSync(join(runDir, 'rollouts', 'first--mfa-login--a1.jsonl'), '{"type":"turn"}\n');
     writeFileSync(join(runDir, 'results.json'), JSON.stringify({ meta: { date: '2026-09-25T03:31:34Z' }, results: [
-      { task: 'mfa-login', condition: 'first', family: 'auth', success: true, input_tokens: 10, output_tokens: 2, answer: 'SECRET', transcript: 'first--mfa-login--a1.jsonl', rollout: 'rollouts/first--mfa-login--a1.jsonl' },
+      { task: 'mfa-login', condition: 'first', family: 'auth', success: true, input_tokens: 10, output_tokens: 2, answer: 'SECRET', transcript: 'first--mfa-login--a1.jsonl', rollout: 'rollouts/first--mfa-login--a1.jsonl', tools: { take_snapshot: { calls: 2, errors: 0 } } },
     ] }));
     writeFileSync(join(runDir, 'diagnoses.json'), JSON.stringify({ run: 'run-one', items: [{ task: 'mfa-login', kind: 'row', diagnosis: { summary: 'A visible step was missed.' } }] }));
     writeFileSync(join(root, 'demo.mp4'), 'example video');
@@ -35,6 +35,7 @@ test('builds selected children and links, and removes deselected children on reb
     assert.match(home, /Reports &lt;gallery&gt;/);
     assert.ok(!home.includes('class="eyebrow"'));
     assert.match(home, /<h1 class="brand">[^]*the_zoo <small>\/ Evals<\/small><\/span><\/h1>/);
+    assert.ok(!home.includes('class="entry-stats"'));
     assert.ok(!home.includes('<h1>Reports &lt;gallery&gt;</h1>'));
     assert.ok(!home.includes('Browser environments'));
     assert.match(home, /href="https:\/\/github.com\/bgrins\/zoo-sites" target="_blank" rel="noopener noreferrer">GitHub repository/);
@@ -50,6 +51,8 @@ test('builds selected children and links, and removes deselected children on reb
     assert.match(child, /href="\.\.\/\.\.\/index.html"/);
     assert.match(child, /<h1>Run one<\/h1>/);
     assert.match(child, /A visible step was missed/);
+    assert.match(child, /aria-label="Tool analysis"/);
+    assert.match(child, /take_snapshot/);
     assert.match(child, /href="traces\/transcripts\/first--mfa-login--a1.jsonl"/);
     assert.match(child, /href="traces\/rollouts\/first--mfa-login--a1.jsonl"/);
     assert.equal(readFileSync(join(out, 'reports', 'first', 'traces', 'transcripts', 'first--mfa-login--a1.jsonl'), 'utf8'), '{"type":"step"}\n');
@@ -87,6 +90,36 @@ test('builds selected children and links, and removes deselected children on reb
     assert.ok(!existsSync(join(out, 'media', 'demo.mp4')));
     assert.ok(!readFileSync(join(out, 'index.html'), 'utf8').includes('Run one'));
     assert.ok(!readFileSync(join(out, 'index.html'), 'utf8').includes('<video'));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('shows matching per-task input and wall ratios on paired report cards', () => {
+  const root = mkdtempSync(join(tmpdir(), 'report-site-ratios-'));
+  try {
+    const runDir = join(root, 'paired');
+    mkdirSync(runDir);
+    writeFileSync(join(runDir, 'results.json'), JSON.stringify({ meta: { date: '2026-09-25T03:31:34Z' }, results: [
+      { task: 'matched', condition: 'firefox-devtools-mcp', success: true, input_tokens: 10, cache_read: 10, wall_s: 6 },
+      { task: 'matched', condition: 'playwright-mcp', success: true, input_tokens: 10, wall_s: 3 },
+      { task: 'unpaired', condition: 'firefox-devtools-mcp', success: true, input_tokens: 1000, wall_s: 100 },
+    ] }));
+    const config = join(root, 'config.json');
+    writeFileSync(config, JSON.stringify({ title: 'Gallery', reports: [
+      { title: 'Paired', run: 'paired', slug: 'paired' },
+    ] }));
+    const out = join(root, 'site');
+    buildReportSite(config, out);
+    const home = readFileSync(join(out, 'index.html'), 'utf8');
+    const report = readFileSync(join(out, 'reports', 'paired', 'index.html'), 'utf8');
+    assert.match(home, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+    assert.match(home, /class="entry-stat"><span>Input ratio<\/span><strong>2\.00×<\/strong>/);
+    assert.match(home, /class="entry-stat wall"><span>Wall-clock ratio<\/span><strong>2\.00×<\/strong>/);
+    assert.match(home, /class="entry-direction">DevTools \/ Playwright<\/div>/);
+    assert.match(home, /class="entry-passes"><span>DevTools <strong>2\/2<\/strong><\/span><span>Playwright <strong>1\/1<\/strong><\/span>/);
+    assert.match(report, /<div class="figure">2\.00×<\/div><div class="figure-label">Input ratio/);
+    assert.match(report, /<div class="figure">2\.00×<\/div><div class="figure-label">Wall-clock ratio/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

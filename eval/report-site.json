@@ -5,12 +5,22 @@
   "links": [],
   "reports": [
     {
-      "title": "GPT-6 Luna: DevTools vs Playwright",
+      "title": "Shared Firefox 152",
+      "intro": "Both tools ran on Firefox 152.0.4.",
       "run": "results/run-2026-09-25T03-31-34-420Z",
       "diagnoses": "diagnoses-gpt-6-luna-high-independent.json",
       "review": "diagnoses-run-v2.json",
       "traces": true,
       "slug": "luna-6-browser-tools"
+    },
+    {
+      "title": "DevTools on Firefox 156",
+      "intro": "DevTools ran on installed Firefox 156.0.1; Playwright is the original Firefox 152.0.4 run.",
+      "run": "results/run-combined-2026-09-25T21-22-40-737Z",
+      "diagnoses": "diagnoses.json",
+      "review": "diagnoses-run.json",
+      "traces": true,
+      "slug": "luna-6-installed-firefox"
     }
   ]
 }

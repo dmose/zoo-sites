@@ -100,6 +100,19 @@ test('renders a paired standalone report without exporting raw evidence', () => 
   assert.match(renderHtmlReport(run, 'run-name', { title: 'Run <two>' }), /<h1>Run &lt;two&gt;<\/h1>/);
 });
 
+test('identifies the source sessions and browsers of a combined report', () => {
+  const combined = structuredClone(run);
+  combined.meta.combinedFrom = [
+    { condition: 'one', run: 'run-firefox' },
+    { condition: 'two', run: 'run-playwright' },
+  ];
+  combined.meta.env = { one: { build: { version: '156.0.1' } }, two: { build: { version: '152.0.4' } } };
+  const html = renderHtmlReport(combined, 'run-combined');
+  assert.match(html, /Combined from separate runs/);
+  assert.match(html, /one: Firefox 156\.0\.1 · run-firefox/);
+  assert.match(html, /two: Firefox 152\.0\.4 · run-playwright/);
+});
+
 test('includes judge verdicts, attribution, feedback and escaped evidence', () => {
   const diagnoses = { run: 'run-name', items: [
     { kind: 'pair', task: 'normal', model: 'judge-model', effort: 'medium', cost_usd: 0.04, gate: { kept: 3, checked: 4 }, diagnosis: {

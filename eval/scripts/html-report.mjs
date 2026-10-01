@@ -4,6 +4,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { totalsByCondition } from '../report.mjs';
 import { latestRun, readRun, transcriptCandidates } from '../run-files.mjs';
+import { analyzeToolUse } from './tool-analysis.mjs';
 
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (character) => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -33,6 +34,25 @@ const geometricMean = (values) => {
   const positive = values.filter((value) => value != null && Number.isFinite(value) && value > 0);
   return positive.length ? Math.exp(positive.reduce((sum, value) => sum + Math.log(value), 0) / positive.length) : null;
 };
+export function pairedRatios(rows, conditionOf = (row) => row.condition) {
+  const conditions = [...new Set(rows.map(conditionOf))];
+  if (conditions.length !== 2) return null;
+  const tasks = new Map();
+  for (const row of rows) {
+    if (!tasks.has(row.task)) tasks.set(row.task, [[], []]);
+    tasks.get(row.task)[conditions.indexOf(conditionOf(row))].push(row);
+  }
+  const inputs = [];
+  const walls = [];
+  for (const attempts of tasks.values()) {
+    if (attempts.some((arm) => !arm.length)) continue;
+    const inputValues = attempts.map((arm) => median(arm.map(input)));
+    const wallValues = attempts.map((arm) => median(arm.map((row) => row.wall_s)));
+    if (inputValues.every((value) => value > 0)) inputs.push(inputValues[0] / inputValues[1]);
+    if (wallValues.every((value) => value > 0)) walls.push(wallValues[0] / wallValues[1]);
+  }
+  return { conditions, input: geometricMean(inputs), wall: geometricMean(walls) };
+}
 const badge = (passed) => `<span class="badge ${passed ? 'pass' : 'fail'}">${passed ? 'Pass' : 'Fail'}</span>`;
 const anchorFor = (id) => `task-${/^[a-z0-9-]+$/.test(id) ? id : `encoded-${Buffer.from(id).toString('hex')}`}`;
 const groupClass = (index) => index % 2 ? 'surface-b' : 'surface-a';
@@ -108,6 +128,38 @@ section { margin-top: 38px; }
 .run-review-list p { margin: 7px 0; font-size: .86rem; }
 .run-review-list a { color: var(--blue); }
 .run-review-list details { margin-top: 10px; font-size: .8rem; }
+.tool-analysis { scroll-margin-top: 80px; }
+.tool-boards, .tool-detail, .tool-notes { display: grid; gap: 16px; }
+.tool-boards, .tool-detail { grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+.tool-boards { margin-top: 18px; }
+.tool-board { min-width: 0; padding: 19px 20px; border-top: 4px solid #78a98b; border-radius: 10px; background: #f3f8f4; }
+.tool-board.surface-b { border-top-color: #c7a364; background: #fcf8ee; }
+.tool-board h3 { margin: 0 0 4px; font-size: 1.05rem; overflow-wrap: anywhere; }
+.tool-board p, .tool-analysis .method { margin: 0; color: #596560; font-size: .78rem; }
+.tool-board > .method { margin-top: 13px; }
+.tool-list { display: grid; gap: 14px; margin-top: 22px; }
+.tool-rank { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 5px 12px; font-size: .81rem; }
+.tool-rank .name { min-width: 0; overflow-wrap: anywhere; font-weight: 650; }
+.tool-rank .measure { color: #54665a; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tool-track { grid-column: 1 / -1; height: 7px; border-radius: 10px; background: #dbe8de; overflow: hidden; }
+.tool-track span { display: block; height: 100%; border-radius: inherit; background: #78a98b; }
+.surface-b .tool-track { background: #efe6d4; }
+.surface-b .tool-track span { background: #c7a364; }
+.tool-detail, .tool-judge { margin-top: 23px; border-top: 1px solid var(--line); padding-top: 19px; }
+.tool-detail h3, .tool-judge h3 { margin: 0 0 10px; font-size: 1rem; }
+.tool-detail h4 { margin: 12px 0 5px; font-size: .81rem; overflow-wrap: anywhere; }
+.tool-detail ul { margin: 0; padding: 0; list-style: none; }
+.tool-detail li { display: flex; flex-wrap: wrap; gap: 3px 12px; justify-content: space-between; border-bottom: 1px solid #e8ece7; padding: 6px 0; font-size: .79rem; }
+.tool-detail li span { overflow-wrap: anywhere; }
+.tool-detail li small { color: #637268; font-size: .75rem; white-space: nowrap; }
+.tool-analysis a { color: #345d79; text-underline-offset: 2px; }
+.tool-notes { grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: 10px; }
+.tool-note { padding: 12px 14px; border-left: 3px solid #9cbfa7; border-radius: 4px; background: #f4f7f4; }
+.tool-note strong { display: block; font-size: .8rem; overflow-wrap: anywhere; }
+.tool-note p { margin: 5px 0; font-size: .78rem; line-height: 1.4; }
+.tool-note small { color: #596560; font-size: .72rem; }
+.tool-judge details { margin-top: 10px; }
+.tool-judge summary { cursor: pointer; font-size: .83rem; font-weight: 650; }
 .overview { display: flex; gap: 30px; flex-wrap: wrap; align-items: flex-end; }
 .comparison .overview { margin-top: 22px; }
 .overview .figure { font-family: Georgia, "Times New Roman", serif; font-size: 2.1rem; font-weight: 700; line-height: 1; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
@@ -268,6 +320,14 @@ for (const control of [search, family, outcome, order]) control.addEventListener
 function revealHash() {
   let id;
   try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
+  if (id === 'tool-analysis') {
+    const panel = document.getElementById(id);
+    if (!panel) return;
+    const position = () => { if (location.hash === '#tool-analysis') panel.scrollIntoView({ block: 'start' }); };
+    requestAnimationFrame(position);
+    reportHeader.addEventListener('transitionend', position, { once: true });
+    return;
+  }
   const row = document.getElementById(id);
   if (!row || !row.classList.contains('task-row')) return;
   if (row.hidden) {
@@ -347,7 +407,24 @@ export function readRunReview(path, runName, diagnosesText, resultsText) {
   return review;
 }
 
-export function renderHtmlReport(run, runName = 'eval run', { homeHref = null, diagnoses = null, runReview = null, traceHref = null, title = 'Browser-agent evaluation' } = {}) {
+function toolUseHtml(analysis) {
+  if (!analysis.arms.some((arm) => arm.tools.length)) return '';
+  const maxCalls = Math.max(...analysis.arms.flatMap((arm) => arm.tools.map((tool) => tool.calls)));
+  const boards = analysis.arms.map((arm, index) => {
+    const total = arm.tools.reduce((calls, tool) => calls + tool.calls, 0);
+    const errors = arm.tools.reduce((calls, tool) => calls + tool.errors, 0);
+    const bars = arm.tools.slice(0, 8).map((tool) => `<div class="tool-rank"><span class="name">${escapeHtml(tool.name)}</span><span class="measure">${count(tool.calls)} · ${count(tool.attempts)} attempts${tool.errors ? ` · ${count(tool.errors)} ${tool.errors === 1 ? 'error' : 'errors'}` : ''}</span><div class="tool-track" aria-hidden="true"><span style="width:${(100 * tool.calls / maxCalls).toFixed(1)}%"></span></div></div>`).join('');
+    return `<article class="tool-board ${groupClass(index)}"><h3>${escapeHtml(arm.condition)}</h3><p>${count(total)} calls · ${count(errors)} explicit ${errors === 1 ? 'error' : 'errors'} · ${count(arm.recorded)}/${count(arm.attempts)} attempts with tool counts</p><div class="tool-list">${bars}</div>${arm.tools.length > 8 ? `<p class="method">${count(arm.tools.length - 8)} more tools · ${count(arm.tools.slice(8).reduce((calls, tool) => calls + tool.calls, 0))} calls</p>` : ''}</article>`;
+  }).join('');
+  const pathGroup = (arm, type) => {
+    const paths = arm[type].slice(0, 4);
+    return `<div><h4>${escapeHtml(arm.condition)} · ${count(arm.traced)}/${count(arm.attempts)} traces</h4>${paths.length ? `<ul>${paths.map((path) => `<li><span>${escapeHtml(path.name)}</span><small>${count(path.calls)} calls · ${count(path.tasks.length)} tasks · <a href="#${anchorFor(path.tasks[0])}">example</a></small></li>`).join('')}</ul>` : `<p class="muted">${arm.traced ? 'None in traced attempts' : 'No transcripts available'}</p>`}</div>`;
+  };
+  const notes = analysis.observations.map((note) => `<article class="tool-note"><strong>${escapeHtml(note.arm)} · ${escapeHtml(note.tool)} · ${escapeHtml(note.behaviour.replaceAll('-', ' '))}</strong><p>${escapeHtml(note.example)}</p><small>${count(note.tasks.length)} ${note.tasks.length === 1 ? 'task' : 'tasks'} · <a href="#${anchorFor(note.tasks[0])}">example</a>${note.limited ? ' · evidence limited' : ''}</small></article>`);
+  return `<section class="panel tool-analysis" id="tool-analysis" aria-label="Tool analysis"><h2>Tool analysis</h2><p class="method">Browser-surface calls only. Bars share a scale across arms; attempts count each task repeat separately.</p><div class="tool-boards">${boards}</div><div class="tool-detail"><div><h3>Common handoffs</h3><p class="method">Consecutive, different browser tools in one attempt.</p>${analysis.arms.map((arm) => pathGroup(arm, 'handoffs')).join('')}</div><div><h3>After explicit tool errors</h3><p class="method">Next browser call after a reported tool error, not necessarily a recovery.</p>${analysis.arms.map((arm) => pathGroup(arm, 'afterErrors')).join('')}</div></div>${notes.length ? `<div class="tool-judge"><h3>Judge observations</h3><p class="method">Grouped by arm, tool and behaviour; each text is an example from one judged task.</p><div class="tool-notes">${notes.slice(0, 6).join('')}</div>${notes.length > 6 ? `<details><summary>${count(notes.length - 6)} more observations</summary><div class="tool-notes">${notes.slice(6).join('')}</div></details>` : ''}</div>` : ''}</section>`;
+}
+
+export function renderHtmlReport(run, runName = 'eval run', { homeHref = null, diagnoses = null, runReview = null, traceHref = null, title = 'Browser-agent evaluation', runDir = null } = {}) {
   if (diagnoses && diagnoses.run !== runName) throw new Error(`diagnoses belong to ${diagnoses.run}, not ${runName}`);
   if (runReview && (runReview.run !== runName || runReview.mode !== 'run' || runReview.source?.pairs !== diagnoses?.items?.filter((item) => item.kind === 'pair').length)) throw new Error('run-wide review needs the matching complete pair judgments');
   const rows = run.results ?? [];
@@ -385,9 +462,9 @@ export function renderHtmlReport(run, runName = 'eval run', { homeHref = null, d
     return { id, family: task.family, arms, complete, different, failure };
   });
   const matched = paired ? pairs.filter((task) => task.complete && task.arms.every((arm) => arm.input > 0)) : [];
-  const inputRatio = geometricMean(matched.map((task) => task.arms[0].input / task.arms[1].input));
-  const wallMatched = paired ? pairs.filter((task) => task.complete && task.arms.every((arm) => arm.wall > 0)) : [];
-  const wallRatio = geometricMean(wallMatched.map((task) => task.arms[0].wall / task.arms[1].wall));
+  const ratios = pairedRatios(rows, groupFor);
+  const inputRatio = ratios?.input ?? null;
+  const wallRatio = ratios?.wall ?? null;
   const outputMatched = paired ? pairs.filter((task) => task.complete && task.arms.every((arm) => arm.output > 0)) : [];
   const outputRatio = geometricMean(outputMatched.map((task) => task.arms[0].output / task.arms[1].output));
   const flips = pairs.filter((task) => task.different).length;
@@ -440,7 +517,8 @@ export function renderHtmlReport(run, runName = 'eval run', { homeHref = null, d
   const date = Number.isFinite(Date.parse(run.meta?.date)) ? new Date(run.meta.date).toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC' : 'Date not recorded';
   const models = [...new Set(rows.map((row) => row.model).filter(Boolean))].join(', ') || 'Model not recorded';
   const backends = [...new Set(rows.map((row) => row.backend).filter(Boolean))].join(', ') || run.meta?.backend || 'Backend not recorded';
-  const metadata = [date, models, backends, `${tasks.size} tasks`, run.meta?.suite && `Suite: ${run.meta.suite}`, run.meta?.git?.commit && `Eval: ${run.meta.git.commit.slice(0, 10)}`].filter(Boolean);
+  const sources = run.meta?.combinedFrom?.map((source) => `${source.condition}: Firefox ${run.meta.env?.[source.condition]?.build?.version ?? 'unknown'} · ${source.run}`) ?? [];
+  const metadata = [date, models, backends, `${tasks.size} tasks`, run.meta?.suite && `Suite: ${run.meta.suite}`, run.meta?.git?.commit && `Eval: ${run.meta.git.commit.slice(0, 10)}`, ...(sources.length ? ['Combined from separate runs', ...sources] : [])].filter(Boolean);
   const metaHtml = metadata.map((item) => `<span>${escapeHtml(item)}</span>`).join('');
   const brandHtml = `<div class="brand">${brandMark}<span>the_zoo <small>/ Evals</small></span></div>`;
   const backLinkHtml = homeHref ? `<a class="back-link" href="${escapeHtml(homeHref)}">All reports</a>` : '';
@@ -449,6 +527,7 @@ export function renderHtmlReport(run, runName = 'eval run', { homeHref = null, d
 <body><main><header><div class="hero-inner"><div class="report-nav">${brandHtml}${backLinkHtml}</div><h1>${escapeHtml(title)}</h1><div class="meta">${metaHtml}</div></div></header><nav class="report-compact" aria-label="Report navigation">${brandHtml}<span class="compact-title">${escapeHtml(title)}</span>${backLinkHtml}</nav>
 ${paired ? `<section class="panel comparison" aria-label="Comparison"><h2>Comparison</h2><div class="overview"><div><div class="figure">${ratio(inputRatio)}</div><div class="figure-label">Input ratio</div></div><div><div class="figure">${ratio(wallRatio)}</div><div class="figure-label">Wall-clock ratio</div></div><div><div class="figure">${ratio(outputRatio)}</div><div class="figure-label">Output ratio</div></div><div><div class="figure">${flips}</div><div class="figure-label">Different pass outcomes</div></div></div><p class="method">${count(matched.length)} paired tasks · ratios above 1 mean ${escapeHtml(conditions[0])} used more</p><div class="summary">${cards}</div></section>` : `<section aria-label="Results by condition"><div class="summary">${cards}</div></section>`}
 ${runReview ? runReviewHtml(runReview) : ''}
+${toolUseHtml(analyzeToolUse(rows, { runDir, diagnoses, conditionOf: groupFor }))}
 <section><div class="section-head"><h2>By task family</h2><p>Token totals and pass rate by surface</p></div><div class="table-wrap"><table><thead><tr><th scope="col" rowspan="2">Family</th><th scope="col" rowspan="2" class="number">Tasks</th>${paired ? '<th scope="colgroup" colspan="2" class="ratio-col ratio-group">Ratios</th>' : ''}${conditions.map((condition, index) => `<th scope="colgroup" colspan="4" class="${groupClass(index)} group-start">${escapeHtml(condition)}</th>`).join('')}</tr><tr>${paired ? '<th scope="col" class="number ratio-col" aria-label="Input ratio">Input</th><th scope="col" class="number ratio-col" aria-label="Wall-clock ratio">Wall</th>' : ''}${conditions.map((condition, index) => `<th scope="col" class="${groupClass(index)} group-start">Pass</th><th scope="col" class="${groupClass(index)} number">Input</th><th scope="col" class="${groupClass(index)} number">Cache</th><th scope="col" class="${groupClass(index)} number">Output</th>`).join('')}</tr></thead><tbody>${families}</tbody></table></div></section>
 <section><div class="section-head"><h2>Tasks</h2><p id="visible" aria-live="polite">${tasks.size} tasks shown</p></div><div class="controls"><label>Search tasks<input id="search" type="search" placeholder="Task name"></label><label>Family<select id="family"><option value="">All families</option>${familyNames.map((family) => `<option value="${escapeHtml(family)}">${escapeHtml(family)}</option>`).join('')}</select></label><label>Outcome<select id="outcome"><option value="all">All outcomes</option><option value="failures">Any failure</option>${paired ? '<option value="different">Different outcomes</option>' : ''}</select></label><label>Order<select id="order"><option value="difference">Largest input gap</option><option value="name">Task name</option></select></label></div><div class="table-wrap"><table id="tasks"><thead><tr><th scope="col" rowspan="2">Task</th>${paired ? '<th scope="colgroup" colspan="2" class="ratio-col ratio-group">Ratios</th>' : ''}${conditions.map((condition, index) => `<th scope="colgroup" colspan="5" class="${groupClass(index)} group-start">${escapeHtml(condition)}</th>`).join('')}</tr><tr>${paired ? '<th scope="col" class="number ratio-col" aria-label="Input ratio">Input</th><th scope="col" class="number ratio-col" aria-label="Wall-clock ratio">Wall</th>' : ''}${conditions.map((condition, index) => `<th scope="col" class="${groupClass(index)} group-start">Pass</th><th scope="col" class="${groupClass(index)} number">Input</th><th scope="col" class="${groupClass(index)} number">Cache</th><th scope="col" class="${groupClass(index)} number">Output</th><th scope="col" class="${groupClass(index)} number" aria-label="Wall time">Wall</th>`).join('')}</tr></thead><tbody>${tableRows}</tbody></table></div></section>
 </main><script>${script}</script></body></html>\n`;
@@ -477,7 +556,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const diagnosesText = diagnosesIndex < 0 ? null : readFileSync(resolve(args[diagnosesIndex + 1]), 'utf8');
     const diagnoses = diagnosesText ? JSON.parse(diagnosesText) : null;
     const runReview = reviewIndex < 0 ? null : readRunReview(resolve(args[reviewIndex + 1]), basename(dir), diagnosesText, readFileSync(join(dir, 'results.json'), 'utf8'));
-    writeFileSync(out, renderHtmlReport(readRun(dir), basename(dir), { diagnoses, runReview, traceHref: localTraceHref(dir, out) }));
+    writeFileSync(out, renderHtmlReport(readRun(dir), basename(dir), { diagnoses, runReview, traceHref: localTraceHref(dir, out), runDir: dir }));
     console.log(`wrote ${out}`);
   }
 }

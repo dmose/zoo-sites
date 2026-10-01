@@ -1022,6 +1022,10 @@ export function markdownReport({ meta, results: stored, totals: given, runDir = 
     `- backend: ${meta.backend} · models: ${models} · effort: ${meta.effort} · suite: ${meta.suite}` +
       (meta.repeat ? ` · repeat: ${meta.repeat}` : '') +
       (meta.seed ? ` · seed: ${meta.seed}` : ''),
+    ...(meta.combinedFrom?.length
+      ? [`- combined from separate runs: ${meta.combinedFrom.map((source) =>
+          `${source.condition} (${source.run}, Firefox ${meta.env?.[source.condition]?.build?.version ?? 'unknown'})`).join('; ')}`]
+      : []),
     ...(meta.interrupted
       ? [
           `- INTERRUPTED by ${meta.interrupted}: tasks it kept from starting are missing, and ` +
